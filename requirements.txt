@@ -1,32 +1,30 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 
-# PyTorch (CPU only)
+# Core API & Server
+fastapi
+uvicorn[standard]
+
+# NLP, vector search, and hybrid RAG pipeline
 torch
-
-# Reranking (CPU)
 sentence-transformers
-scikit-learn             # For BM25 and text processing dependencies
+nltk
+scikit-learn
 
-# BM25 for hybrid search
+openai
+pinecone
 pinecone-text
 
-# LangChain + Retrieval + OpenAI embedding/LLM
-openai
 langchain
 langchain-core
 langchain-openai
 
-# Vector database
-pinecone
-
-# Redis for queue (Upstash/Redis)
+# Job queue and cache
 redis
 python-dotenv
 
-# PDF and requests
+# PDF processing and requests
 PyMuPDF
 requests
-nltk                      # For punkt/stopwords, run download at build!
 
-# Utilities
-tqdm                      # Nice progress bar for batch jobs (optional, not required)
+# Utils (highly recommended for batch process feedback)
+tqdm

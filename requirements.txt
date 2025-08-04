@@ -1,0 +1,26 @@
+# Tell pip to also look for packages in the PyTorch CPU repository
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# Now, list torch as a requirement so pip installs the CPU version
+torch
+
+# Core application libraries
+fastapi
+uvicorn[standard]
+sentence-transformers
+
+# For OpenAI API and LangChain integration
+openai
+langchain
+langchain-core
+langchain-openai
+
+# For vector DB, job queue, and environment variables
+pinecone
+pinecone-text
+redis
+python-dotenv
+
+# For PDF processing and web requests
+PyMuPDF
+requests

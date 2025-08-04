@@ -1,0 +1,5 @@
+.env
+/jobs/
+/results/
+processed_docs.txt
+venv/

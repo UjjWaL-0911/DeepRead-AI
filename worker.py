@@ -104,7 +104,7 @@ async def get_llm_answer_async(query: str, context_chunks: List[str]) -> str:
     openrouter_client = openai.AsyncOpenAI(
         base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"),
         default_headers={
-            "HTTP-Referer": "https://github.com/Pratham-csv/HACKRX.git",
+            "HTTP-Referer": "https://github.com/UjjwaL-0911/DeepRead-AI.git",
             "X-Title": "Intelligent Query-Retrieval System"
         }
     )
@@ -120,7 +120,7 @@ ANSWER:
 """
     try:
         response = await openrouter_client.chat.completions.create(
-            model="mistralai/mistral-large-latest", 
+            model="mistralai/mistral-7b-instruct-v0.2", 
             messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content.strip()

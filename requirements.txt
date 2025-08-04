@@ -1,26 +1,32 @@
-# Tell pip to also look for packages in the PyTorch CPU repository
 --extra-index-url https://download.pytorch.org/whl/cpu
 
-# Now, list torch as a requirement so pip installs the CPU version
+# PyTorch (CPU only)
 torch
 
-# Core application libraries
-fastapi
-uvicorn[standard]
+# Reranking (CPU)
 sentence-transformers
+scikit-learn             # For BM25 and text processing dependencies
 
-# For OpenAI API and LangChain integration
+# BM25 for hybrid search
+pinecone-text
+
+# LangChain + Retrieval + OpenAI embedding/LLM
 openai
 langchain
 langchain-core
 langchain-openai
 
-# For vector DB, job queue, and environment variables
+# Vector database
 pinecone
-pinecone-text
+
+# Redis for queue (Upstash/Redis)
 redis
 python-dotenv
 
-# For PDF processing and web requests
+# PDF and requests
 PyMuPDF
 requests
+nltk                      # For punkt/stopwords, run download at build!
+
+# Utilities
+tqdm                      # Nice progress bar for batch jobs (optional, not required)

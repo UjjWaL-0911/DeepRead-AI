@@ -4,17 +4,21 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import json
 import requests
 import tempfile
-import fitz # PyMuPDF
+import fitz  # PyMuPDF
 import pinecone
 import redis
 import openai
 import asyncio
+import nltk
 from dotenv import load_dotenv
 from typing import List, Tuple
 from pinecone_text.sparse import BM25Encoder
-
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from sentence_transformers import CrossEncoder
+
+# Download nltk resources at startup if needed
+nltk.download('punkt', quiet=True)
+nltk.download('stopwords', quiet=True)
 
 print("🚀 Worker starting up...")
 load_dotenv()
@@ -28,7 +32,7 @@ EMBEDDING_MODEL_API = "text-embedding-3-small"
 EMBEDDING_DIMENSION = 1536
 PROCESSED_DOCS_SET_KEY = "processed_docs_hybrid_v1"
 
-print("📦 Loading Cross-Encoder model for re-ranking...")
+print("📦 Loading Cross-Encoder model for re-ranking (CPU)...")
 reranker_model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
 print("✅ Re-ranker model loaded.")
 
@@ -43,64 +47,70 @@ index = pc.Index(INDEX_NAME)
 print("✅ Worker is ready and waiting for jobs.")
 print("-" * 50)
 
-def get_embeddings(texts: List[str]) -> List[List[float]]:
-    if not texts: return []
-    texts = [text.replace("\n", " ") for text in texts]
-    response = sync_openai_client.embeddings.create(input=texts, model=EMBEDDING_MODEL_API)
-    return [embedding.embedding for embedding in response.data]
+def get_embeddings(texts: List[str], batch_size: int = 96) -> List[List[float]]:
+    """Batched embedding generation for speed (OpenAI API limit for small model is 96 per batch)."""
+    embeddings = []
+    for i in range(0, len(texts), batch_size):
+        batch = [t.replace("\n", " ") for t in texts[i:i+batch_size]]
+        response = sync_openai_client.embeddings.create(input=batch, model=EMBEDDING_MODEL_API)
+        for embedding in response.data:
+            embeddings.append(embedding.embedding)
+    return embeddings
 
 def process_and_index_pdf(file_path: str, document_id: str, cancel_key: str):
     print(f"⚙️ Starting Hybrid Search indexing for: {document_id}")
     doc = fitz.open(file_path)
     full_text = "".join(page.get_text() for page in doc)
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1024, chunk_overlap=100)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=200)
     chunks = text_splitter.split_text(full_text)
     print(f"📄 Document split into {len(chunks)} chunks.")
 
     bm25 = BM25Encoder()
     bm25.fit(chunks)
-    
-    batch_size = 200
+    batch_size = 1000  # Pinecone free tier max per upsert
+
     for i in range(0, len(chunks), batch_size):
         if redis_conn.exists(cancel_key):
             raise InterruptedError(f"Job {document_id} canceled during indexing.")
         batch_chunks = chunks[i:i + batch_size]
-        dense_embeddings = get_embeddings(batch_chunks)
+        dense_embeddings = get_embeddings(batch_chunks, batch_size=96)
         sparse_vectors = bm25.encode_documents(batch_chunks)
-        vectors_to_upsert = []
-        for j, (chunk_text, dense_vec, sparse_vec) in enumerate(zip(batch_chunks, dense_embeddings, sparse_vectors)):
-            vectors_to_upsert.append({
+        vectors_to_upsert = [
+            {
                 "id": f"{document_id}-chunk-{i+j}",
                 "values": dense_vec,
                 "sparse_values": sparse_vec,
                 "metadata": {"text": chunk_text, "document_id": document_id}
-            })
+            } for j, (chunk_text, dense_vec, sparse_vec) in enumerate(zip(batch_chunks, dense_embeddings, sparse_vectors))
+        ]
         print(f"📤 Upserting batch of {len(vectors_to_upsert)} hybrid vectors...")
         index.upsert(vectors=vectors_to_upsert)
     print(f"✅ Finished hybrid indexing with {len(chunks)} chunks.")
 
-def retrieve_and_rerank_context(original_query: str, document_id: str) -> List[str]:
+def retrieve_and_rerank_context(original_query: str, document_id: str, bm25_encoder: BM25Encoder = None, k_retrieve=20, k_rerank=5) -> List[str]:
     dense_embedding = get_embeddings([original_query])[0]
-    bm25 = BM25Encoder()
-    bm25.fit([original_query]) 
+    bm25 = bm25_encoder or BM25Encoder()
+    bm25.fit([original_query])  # fast; only fitting on one query, not slow
     sparse_embedding = bm25.encode_queries(original_query)
     results = index.query(
         vector=dense_embedding,
         sparse_vector=sparse_embedding,
         alpha=0.5,
-        top_k=50,
-        include_metadata=True, 
+        top_k=k_retrieve,
+        include_metadata=True,
         filter={"document_id": {"$eq": document_id}}
     )
     candidate_chunks = [m['metadata']['text'] for m in results['matches']]
-    if not candidate_chunks: return []
+    if not candidate_chunks:
+        return []
     rerank_pairs = [[original_query, chunk] for chunk in candidate_chunks]
     scores = reranker_model.predict(rerank_pairs)
     scored_chunks = sorted(zip(scores, candidate_chunks), key=lambda x: x[0], reverse=True)
-    return [chunk for score, chunk in scored_chunks[:5]]
+    return [chunk for score, chunk in scored_chunks[:k_rerank]]
 
 async def get_llm_answer_async(query: str, context_chunks: List[str]) -> str:
-    if not context_chunks: return "Could not find relevant information."
+    if not context_chunks:
+        return "Could not find relevant information."
     openrouter_client = openai.AsyncOpenAI(
         base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"),
         default_headers={
@@ -120,7 +130,7 @@ ANSWER:
 """
     try:
         response = await openrouter_client.chat.completions.create(
-            model="mistralai/mistral-7b-instruct-v0.2", 
+            model="mistralai/mistral-7b-instruct-v0.2",
             messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content.strip()

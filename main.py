@@ -9,6 +9,10 @@ from pydantic import BaseModel
 from typing import List
 from dotenv import load_dotenv
 
+import nltk
+nltk.download('punkt')
+nltk.download('stopwords')
+
 # --- 1. SETUP & CONSTANTS ---
 load_dotenv()
 EXPECTED_AUTH_TOKEN = "c88d7e70b6c77cd88271a48126bcd54761315985a275d864cd7e2b7ba342f1cf"

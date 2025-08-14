@@ -1,30 +1,32 @@
---extra-index-url https://download.pytorch.org/whl/cpu
+# --- Core ML & RAG Pipeline ---
+torch
+sentence-transformers
+langchain
+nltk
+openai>=1.3.0
 
-# Core API & Server
+# --- Web Server & API ---
 fastapi
 uvicorn[standard]
 
-# NLP, vector search, and hybrid RAG pipeline
-torch
-sentence-transformers
-nltk
-scikit-learn
-
-openai
-pinecone
-pinecone-text
-
-langchain
-langchain-core
-langchain-openai
-
-# Job queue and cache
+# --- Data Stores & Clients ---
+astrapy>=0.8.0
 redis
-python-dotenv
-
-# PDF processing and requests
-PyMuPDF
+aiohttp
 requests
 
-# Utils (highly recommended for batch process feedback)
-tqdm
+# --- Document & Data Parsers ---
+PyMuPDF
+python-docx
+python-pptx
+pandas
+openpyxl
+beautifulsoup4
+lxml
+
+# --- Language & Utilities ---
+langdetect
+# Modern replacement for googletrans that resolves dependency conflicts
+deep-translator
+python-dotenv
+pyngrok

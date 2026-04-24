@@ -22,7 +22,7 @@ import redis
 from bs4 import BeautifulSoup
 from docx import Document
 from dotenv import load_dotenv
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import CrossEncoder
 from astrapy import DataAPIClient
 from langdetect import detect

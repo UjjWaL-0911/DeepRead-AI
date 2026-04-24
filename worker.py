@@ -41,9 +41,9 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # --- Constants ---
 EMBEDDING_MODEL_API = "text-embedding-3-small"
 EMBEDDING_DIMENSION = 1536
-VECTOR_COLLECTION_NAME = "newtest"
-KEYWORD_INDEX_COLLECTION_NAME = "keyword_index"
-PROCESSED_DOCS_KEY = "v1" # Redis key for tracking processed docs
+VECTOR_COLLECTION_NAME = "ragdb_semantic"
+KEYWORD_INDEX_COLLECTION_NAME = "ragdb_keyword"
+PROCESSED_DOCS_KEY = "v2" # Redis key for tracking processed docs
 
 def load_environment_config() -> Dict[str, str]:
     """Loads required environment variables and returns them as a dictionary."""
@@ -341,7 +341,11 @@ def build_and_store_inverted_index(
     ]
     
     if index_docs:
-        keyword_collection.insert_many(index_docs)
+        # FIX: Send to Astra DB in batches of 200 to prevent 10-second timeout
+        batch_size = 200
+        for i in range(0, len(index_docs), batch_size):
+            keyword_collection.insert_many(index_docs[i : i + batch_size])
+            
     print(f"✅ Inverted index stored for {len(inverted_index)} unique tokens.")
 
 
@@ -384,7 +388,12 @@ async def _process_and_index_document(
         }
         for i, (chunk, dense) in enumerate(zip(chunks, dense_embeddings))
     ]
-    services["vector_collection"].insert_many(documents_to_insert)
+    
+    # FIX: Send vectors to Astra DB in batches of 50 to prevent timeouts
+    batch_size = 50
+    for i in range(0, len(documents_to_insert), batch_size):
+        services["vector_collection"].insert_many(documents_to_insert[i : i + batch_size])
+        
     t4 = logtime("Inserted all chunks into Astra DB", t0, t3)
     
     # 5. Mark as processed in Redis on success

@@ -67,7 +67,7 @@ def initialize_services(config: Dict[str, str]) -> Dict[str, Any]:
     async_openai_client = openai.AsyncOpenAI(api_key=config["openai_api_key"])
     
     print("🧠 Loading CrossEncoder model for reranking...")
-    reranker_model = CrossEncoder('BAAI/bge-reranker-base')
+    reranker_model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
     print("✅ CrossEncoder model loaded.")
     
     print("☁️ Connecting to Astra DB...")

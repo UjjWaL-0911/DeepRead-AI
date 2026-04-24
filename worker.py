@@ -66,9 +66,9 @@ def initialize_services(config: Dict[str, str]) -> Dict[str, Any]:
     sync_openai_client = openai.OpenAI(api_key=config["openai_api_key"])
     async_openai_client = openai.AsyncOpenAI(api_key=config["openai_api_key"])
     
-    # print("🧠 Loading CrossEncoder model for reranking...")
-    # reranker_model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-    # print("✅ CrossEncoder model loaded.")
+    print("🧠 Loading CrossEncoder model for reranking...")
+    reranker_model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+    print("✅ CrossEncoder model loaded.")
     
     print("☁️ Connecting to Astra DB...")
     astra_client = DataAPIClient(config["astra_db_application_token"])
@@ -106,6 +106,7 @@ def initialize_services(config: Dict[str, str]) -> Dict[str, Any]:
         "redis_conn": redis_conn,
         "sync_openai_client": sync_openai_client,
         "async_openai_client": async_openai_client,
+        "reranker_model": reranker_model,
         "db": db,
         "vector_collection": vector_collection,
         "keyword_index_collection": keyword_index_collection
@@ -670,48 +671,49 @@ async def hybrid_retrieve_async(
     logtime(f"[Main-Thread] Total retrieval for '{document_id}'", start_time, t1)
     return combined_results
 
-async def rerank_contexts_batch(
+def rerank_contexts_batch(
     queries: List[str], contexts_per_query: List[List[Tuple[str, str]]], services: Dict[str, Any],
     semantic_weight: float, keyword_weight: float, k_rerank: int
 ) -> List[List[str]]:
-    """Uses LLM to evaluate and select the best contexts, saving server RAM."""
-    final_reranked_results = []
+    """Performs batched reranking with weighted scores."""
+    if not any(contexts_per_query): return [[] for _ in queries]
+    t0 = time.perf_counter()
+    all_pairs, all_sources = [], []
+    contexts_counts = [len(contexts) for contexts in contexts_per_query]
     
-    for query, context_tuples in zip(queries, contexts_per_query):
-        if not context_tuples:
-            final_reranked_results.append([])
+    for query, contexts_with_sources in zip(queries, contexts_per_query):
+        if contexts_with_sources:
+            for context, source in contexts_with_sources:
+                all_pairs.append([query, context])
+                all_sources.append(source)
+    if not all_pairs: return [[] for _ in queries]
+
+    print(f"🧠 Reranking {len(all_pairs)} query-context pairs...")
+    base_scores = services["reranker_model"].predict(all_pairs, show_progress_bar=False, batch_size=128)
+    
+    adjusted_scores = []
+    for score, source in zip(base_scores, all_sources):
+        if source == 'semantic': adjusted_scores.append(score * semantic_weight)
+        elif source == 'keyword': adjusted_scores.append(score * keyword_weight)
+        elif source == 'both': adjusted_scores.append(score * (semantic_weight + keyword_weight))
+        else: adjusted_scores.append(score)
+
+    final_reranked_contexts = []
+    current_index = 0
+    for count in contexts_counts:
+        if count == 0:
+            final_reranked_contexts.append([])
             continue
+        query_pairs = all_pairs[current_index : current_index + count]
+        query_adj_scores = adjusted_scores[current_index : current_index + count]
+        original_contexts = [pair[1] for pair in query_pairs]
+        reranked_results = sorted(zip(original_contexts, query_adj_scores), key=lambda x: x[1], reverse=True)
+        final_chunks = [result[0] for result in reranked_results[:k_rerank]]
+        final_reranked_contexts.append(final_chunks)
+        current_index += count
             
-        # Extract just the text from tuples
-        candidate_texts = [ctx[0] for ctx in context_tuples]
-        
-        # Build a prompt for the LLM to act as a reranker
-        context_list = "\n".join([f"[{i}] {text[:500]}" for i, text in enumerate(candidate_texts)])
-        rerank_prompt = f"""
-        Given the user question: "{query}"
-        And the following retrieved document chunks:
-        {context_list}
-        
-        Identify the {k_rerank} most relevant chunks that directly help answer the question.
-        Return ONLY a JSON list of the indices (e.g., [0, 4, 12]).
-        """
-        
-        try:
-            response = await services["async_openai_client"].chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": rerank_prompt}],
-                response_format={ "type": "json_object" }
-            )
-            # Parse indices and return the actual text chunks
-            import json
-            indices = json.loads(response.choices[0].message.content).get("indices", [])
-            final_chunks = [candidate_texts[i] for i in indices if i < len(candidate_texts)]
-            final_reranked_results.append(final_chunks[:k_rerank])
-        except Exception as e:
-            print(f"⚠️ LLM Reranking failed, falling back to top candidates: {e}")
-            final_reranked_results.append(candidate_texts[:k_rerank])
-            
-    return final_reranked_results
+    logtime(f"BATCH Weighted Reranking (top {k_rerank})", t0)
+    return final_reranked_contexts
 
 # --- REPLACE this entire function in worker.py ---
 
